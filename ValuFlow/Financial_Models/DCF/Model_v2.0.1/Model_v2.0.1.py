@@ -2,9 +2,9 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # ----------------------------------------------------
 # CAPM Inputs ----------------------------------------
-Risk_Free_Rate = 0.0423
-ERP = 0.0418
-Beta = 0.74
+Risk_Free_Rate = 0.0423                               # 10-yr Treasury, March 2026
+ERP = 0.0418                                          # Damodaran, January 2026
+Beta = 0.74                                           # Yahoo Finance, 5-yr monthly, March 2026
 # ----------------------------------------------------
 # CAPM Calculcation ----------------------------------
 Cost_of_Equity = Risk_Free_Rate + Beta * ERP
@@ -19,7 +19,7 @@ After_Tax_Cost_of_Debt = Pre_Tax_Cost_of_Debt * (1 - Marginal_Tax_Rate)
 Kd = After_Tax_Cost_of_Debt
 # ----------------------------------------------------
 # Capital Structure Inputs ---------------------------
-Market_Cap = 334680000000
+Market_Cap = 334680000000                             # Google Finance, March 18 2026
 Total_Debt = 45492000000
 # ----------------------------------------------------
 # Capital Structure Calculations ---------------------
