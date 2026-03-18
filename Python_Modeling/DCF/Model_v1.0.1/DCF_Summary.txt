@@ -1,0 +1,6 @@
+Terminal Value: 183,105,254,731.79
+Discounted Terminal Value: 70,595,002,221.13
+PV of Projected FCFs: 45,963,378,529.67
+PV of Terminal Value: 70,595,002,221.13
+Enterprise Value: 116,558,380,750.80
+Implied Share Price: 27.02
