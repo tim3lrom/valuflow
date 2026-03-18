@@ -1,0 +1,6 @@
+Terminal Value: nan
+Discounted Terminal Value: nan
+PV of Projected FCFs: 0.00
+PV of Terminal Value: nan
+Enterprise Value: nan
+Implied Share Price: nan
