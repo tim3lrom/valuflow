@@ -20,7 +20,7 @@ Kd = After_Tax_Cost_of_Debt
 # ----------------------------------------------------
 # Capital Structure Inputs ---------------------------
 Market_Cap = 334680000000                             # Google Finance, March 18 2026
-Total_Debt = 45492000000
+Total_Debt = 45492000000                              # Snowflake
 # ----------------------------------------------------
 # Capital Structure Calculations ---------------------
 Total_Capital = Market_Cap + Total_Debt

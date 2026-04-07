@@ -1,20 +1,20 @@
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # Model Inputs --------------------------------------
-Base_Year_Revenue = 47941000000
-Revenue_Growth_Rate = 0.037
-EBIT_Margin = 0.301
-Tax_Rate = 0.18
-DA_of_Revenue = 0.03
-CapEx_of_Revenue = 0.05
-NWC_Delta = 0.01
-Terminal_Growth_Rate = 0.03
-Net_Debt = 32000000000
-Shares_Outstanding = 4313000000
+Base_Year_Revenue = 47941000000                         #snowflake
+Revenue_Growth_Rate = 0.037                             #want to calculate  
+EBIT_Margin = 0.301                                     #not sure if in snowflake
+Tax_Rate = 0.18                                         #snowflake
+DA_of_Revenue = 0.03                                    #assumption
+CapEx_of_Revenue = 0.05                                 #assumption
+NWC_Delta = 0.01                                        #assumption
+Terminal_Growth_Rate = 0.03                             #assumption
+Net_Debt = 32000000000                                  #snowflake
+Shares_Outstanding = 4313000000                         #snowflake
 # ----------------------------------------------------
 # WACC Import ----------------------------------------
 import importlib.util
-spec = importlib.util.spec_from_file_location("wacc", r"C:\Users\timel\Desktop\ValuFlow\Python_Modeling\DCF\Model_v2.0.1\Model_v2.0.1.py")
+spec = importlib.util.spec_from_file_location("wacc", r"C:\Users\timel\Desktop\ValuFlow\ValuFlow\Financial_Models\DCF\Model_v2.0.1\Model_v2.0.1.py")
 wacc_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wacc_module)
 WACC = wacc_module.WACC

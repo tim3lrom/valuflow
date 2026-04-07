@@ -5,3 +5,4 @@
 */*/*/.env
 __pycache__/
 *.pyc
+snowflake_key.p8
