@@ -9,11 +9,6 @@ import os
 # --- LOAD ENVIRONMENT VARIABLES ---
 load_dotenv(dotenv_path=r"C:\Users\timel\Desktop\ValuFlow\.env", override=True)
 
-# --- DEBUG: CONFIRM ENV LOADING ---
-print("USER:", os.getenv("SNOWFLAKE_USER"))
-print("ACCOUNT:", os.getenv("SNOWFLAKE_ACCOUNT"))
-print("KEY PATH:", os.getenv("SNOWFLAKE_PRIVATE_KEY_PATH"))
-
 # --- FMP API KEY ---
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 BASE_URL = "https://financialmodelingprep.com/stable"
@@ -67,6 +62,7 @@ def upload_to_snowflake(df, table_name, schema):
     conn.cursor().execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
     conn.cursor().execute(f"USE SCHEMA {schema}")
     df.columns = [col.upper() for col in df.columns]
+    df = df.reset_index(drop=True)
     success, nchunks, nrows, _ = write_pandas(
         conn, df, table_name.upper(),
         schema=schema.upper(),
@@ -80,7 +76,11 @@ def upload_to_snowflake(df, table_name, schema):
 def run():
     income_statements = []
     balance_sheets = []
+    cash_flows = []
     price_data = []
+    profiles = []
+    key_metrics = []
+    ratios = []
 
     for ticker in TICKERS:
         print(f"\nFetching data for {ticker}...")
@@ -93,21 +93,45 @@ def run():
         df_bs = fetch_fmp("balance-sheet-statement", ticker, "&period=annual&limit=5")
         balance_sheets.append(df_bs)
 
-        # Price Data
+        # Cash Flow Statement
+        df_cf = fetch_fmp("cash-flow-statement", ticker, "&period=annual&limit=5")
+        cash_flows.append(df_cf)
+
+        # Historical Price Data
         df_price = fetch_fmp("historical-price-eod/light", ticker, "&from=2020-01-01")
         price_data.append(df_price)
+
+        # Company Profile
+        df_profile = fetch_fmp("profile", ticker)
+        profiles.append(df_profile)
+
+        # Key Metrics
+        df_km = fetch_fmp("key-metrics", ticker, "&period=annual&limit=5")
+        key_metrics.append(df_km)
+
+        # Financial Ratios
+        df_ratios = fetch_fmp("ratios", ticker, "&period=annual&limit=5")
+        ratios.append(df_ratios)
 
     # --- COMBINE ALL TICKERS ---
     df_is_all = pd.concat(income_statements, ignore_index=True)
     df_bs_all = pd.concat(balance_sheets, ignore_index=True)
+    df_cf_all = pd.concat(cash_flows, ignore_index=True)
     df_price_all = pd.concat(price_data, ignore_index=True)
+    df_profile_all = pd.concat(profiles, ignore_index=True)
+    df_km_all = pd.concat(key_metrics, ignore_index=True)
+    df_ratios_all = pd.concat(ratios, ignore_index=True)
 
-    print("\nUploading to Snowflake...")
+    print("\nUploading to Snowflake RAW...")
 
     # --- UPLOAD TO SNOWFLAKE RAW SCHEMA ---
     upload_to_snowflake(df_is_all, "INCOME_STMT", "RAW")
     upload_to_snowflake(df_bs_all, "BALANCE_SHEET", "RAW")
+    upload_to_snowflake(df_cf_all, "CASH_FLOW_STMT", "RAW")
     upload_to_snowflake(df_price_all, "PRICE_DATA", "RAW")
+    upload_to_snowflake(df_profile_all, "COMPANY_PROFILE", "RAW")
+    upload_to_snowflake(df_km_all, "KEY_METRICS", "RAW")
+    upload_to_snowflake(df_ratios_all, "RATIOS", "RAW")
 
     print("\nIngestion complete.")
 
