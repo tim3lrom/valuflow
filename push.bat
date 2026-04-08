@@ -1,3 +1,3 @@
 git add .
-git commit -m "Fixed commenting & (implied_coupon & total_debt) using latest year to discount"
+git commit -m "Calculated Dmv & uploads result to Snowflake"
 git push origin main
