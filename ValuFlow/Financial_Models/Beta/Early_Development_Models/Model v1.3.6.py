@@ -1,4 +1,4 @@
-# ------- Hamada's Equation - Market Value of Debt (Dmv) Estimation ------- #
+# ------- Hamada's Equation - Market Value of Debt & Equity (Dmv & Emv) ------- #
 # ------- Model v1.3.6 ------- #
 
 # -- CHANGES FROM PREVIOUS MODEL --
@@ -10,10 +10,10 @@
 # -- Added numpy, snowflake.connector, write_pandas, serialization, datetime imports
 
 # -- PURPOSE --
-# -- Estimates the Market Value of Debt (Dmv) for use in Hamada's Equation
-# -- Dmv is approximated using the Damodaran Synthetic Rating Approach
-# -- This script covers Step 1: Calculating the Pre-Tax and After-Tax Cost of Debt (Kd)
-# -- This script covers Step 2: Discounting debt cash flows at Kd to estimate Dmv
+# -- Estimates Dmv and Emv for use in Hamada's Equation D/E ratio
+# -- Dmv approximated using the Damodaran Synthetic Rating Approach
+# -- Emv pulled directly from Snowflake (market cap = price x shares outstanding)
+# -- Both outputs written to VALUFLOW.MODELS with timestamps as point-in-time snapshots
 
 # -- METHODOLOGY --
 # -- Step 1: Pull ICR, Implied Coupon Rate, and Total Debt from Snowflake (VALUFLOW.STAGING.VALUATION_INPUTS)
@@ -23,18 +23,26 @@
 # -- Step 5: Apply Tax Shield -> Kd (After-Tax) = Kd (Pre-Tax) * (1 - Tax Rate)
 # -- Step 6: Discount semi-annual debt cash flows at Kd_pretax -> Dmv
 # -- Step 7: Write Dmv output to VALUFLOW.MODELS.DMV_OUTPUT with timestamp
+# -- Step 8: Pull Emv (market cap) from VALUFLOW.RAW.SHARES_OUTSTANDING
+# -- Step 9: Write Emv output to VALUFLOW.MODELS.EMV_OUTPUT with timestamp
 # -- Next:   Use Dmv + Emv to calculate D/E ratio for Hamada's Equation
 
 # -- DATA SOURCES --
-# -- Valuation Inputs: Snowflake -> VALUFLOW.STAGING.VALUATION_INPUTS
-# -- Tax Rate:         Snowflake -> VALUFLOW.STAGING.FINANCIALS_CLEAN
-# -- Spread Table:     Damodaran (NYU) -> updates annually every January
-# -- Risk-Free Rate:   FMP Treasury Rates API -> daily
+# -- Valuation Inputs:    Snowflake -> VALUFLOW.STAGING.VALUATION_INPUTS
+# -- Tax Rate:            Snowflake -> VALUFLOW.STAGING.FINANCIALS_CLEAN
+# -- Shares Outstanding:  Snowflake -> VALUFLOW.RAW.SHARES_OUTSTANDING
+# -- Spread Table:        Damodaran (NYU) -> updates annually every January
+# -- Risk-Free Rate:      FMP Treasury Rates API -> daily
 
 # -- INPUTS --
-# -- Ticker:           Defined in Section 0
-# -- ICR Method:       Defined in Section 0 (latest or average of past 3 years)
-# -- Maturity Years:   Defined in Section 0 (hardcoded from 10-K, updated manually per company)
+# -- Ticker:              Defined in Section 0
+# -- ICR Method:          Defined in Section 0 (latest or average of past 3 years)
+# -- Maturity Years:      Defined in Section 0 (hardcoded from 10-K, updated manually per company)
+
+# -- SNOWFLAKE CONNECTIONS --
+# -- SQLAlchemy engine (password auth) used for pd.read_sql() queries in Sections 2 and 3.5
+# -- snowflake.connector (private key auth) used for write_pandas() uploads in Sections 8 and 9
+# -- Both connection types required — SQLAlchemy for reads, connector for writes
 
 # -- KNOWN LIMITATIONS --
 # -- ICR-based Dmv is an estimation, not a directly observed market price
@@ -42,7 +50,8 @@
 # -- Qualitative factors (partnerships, M&A activity, asset optionality) not captured in ICR
 # -- Implied coupon rate is derived (Interest Expense / Total Debt), not sourced from debt schedule
 # -- Maturity hardcoded from 10-K — requires manual update per company
-# -- Dmv written to Snowflake with timestamp — treat as point-in-time snapshot, not live value
+# -- Emv derived as market cap (marketCap / price * price) — point-in-time from equity_data.py run
+# -- Dmv and Emv written to Snowflake with timestamps — treat as point-in-time snapshots, not live values
 # -- Tax rate falls back to 0% for companies with NOL carryforwards — updates dynamically as earnings improve
 
 # Imports
