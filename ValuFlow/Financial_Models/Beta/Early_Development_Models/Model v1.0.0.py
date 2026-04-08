@@ -1,4 +1,6 @@
 # ------- Basic Hamanda Equation ------- #
+# ------- Uses Book Value ------- #
+
 # -- using fake numbers -- #
 
 #Inputs

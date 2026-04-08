@@ -1,4 +1,6 @@
 # ------- Regression Formula for Levered & Hamanda's Equation for Unlevered Beta ------- #
+# ------- Uses Book Value ------- #
+
 # -- using Snowflake's VALUFLOW.RAW.PRICE_DATA's PRICE Column for the SYMBOL "GSAT" -- #
 # -- using FMP's S&P 500 Market_Returns -> stored in Snowflake's VALUFLOW.RAW.SP500_PRICES
 # -- using Snowflake's Debt & Equity

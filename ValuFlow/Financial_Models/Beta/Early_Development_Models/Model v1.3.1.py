@@ -1,11 +1,14 @@
 # ------- Regression Formula for Levered & Hamanda's Equation for Unlevered Beta ------- #
+# ------- Uses Book Value ------- #
+
 # -- using Snowflake's VALUFLOW.RAW.PRICE_DATA's PRICE Column for the input TICKER -- #
 # -- using FMP's S&P 500 Market_Returns -> stored in Snowflake's VALUFLOW.RAW.SP500_PRICES
 # -- using Snowflake's Debt & Equity
 # -- speeds FMP's import into Snowflake, efficiency improvement
 
-# -- now allows for me to have a simple INPUT for the ticker I am running the model for
-# -- trying to fix GSAT personal calculated Beta vs Beta found on the web
+# -- allows for a simple ticker input
+# -- allows for a simple ticker frequency input
+# -- trying to fix GSAT personal calculated Beta vs Beta found on the web -- deemed fixed (needed to use monthly return frequency), online Betas are within a 7% difference
 
 #Imports
 import snowflake.connector
@@ -17,7 +20,7 @@ from datetime import datetime
 import pandas as pd
 
 #---------- INPUT ----------#
-TICKER = "GSAT"
+TICKER = "GSAT"         #  only works for companies I already have in Snowflake DB
 FREQUENCY = "monthly"         # options: "daily", "weekly", "monthly"
 #---------------------------#
 

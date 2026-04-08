@@ -1,4 +1,6 @@
 # ------- Regression Formula for Levered Beta ------- #
+# ------- Uses Book Value ------- #
+
 # -- using fake numbers -- #
 import numpy as np
 

@@ -1,4 +1,6 @@
 # ------- Regression Formula for Levered & Hamanda's Equation for Unlevered Beta ------- #
+# ------- Uses Book Value ------- #
+
 # -- using fake numbers -- #
 import numpy as np
 

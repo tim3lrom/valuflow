@@ -4,8 +4,9 @@
 # -- using Snowflake's Debt & Equity
 # -- speeds FMP's import into Snowflake, efficiency improvement
 
-# -- now allows for me to have a simple INPUT for the ticker I am running the model for
-# -- trying to fix GSAT personal calculated Beta vs Beta found on the web -- deemed fixed, online Betas are within a 7% difference
+# -- allows for a simple ticker input
+# -- allows for a simple ticker frequency input
+# -- trying to fix GSAT personal calculated Beta vs Beta found on the web -- deemed fixed (needed to use monthly return frequency), online Betas are within a 7% difference
 
 #Imports
 import snowflake.connector
@@ -17,7 +18,7 @@ from datetime import datetime
 import pandas as pd
 
 #---------- INPUT ----------#
-TICKER = "GSAT"
+TICKER = "GSAT"         #  only works for companies I already have in Snowflake DB
 FREQUENCY = "monthly"         # options: "daily", "weekly", "monthly"
 #---------------------------#
 
