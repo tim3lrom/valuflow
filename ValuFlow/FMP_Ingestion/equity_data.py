@@ -28,7 +28,8 @@
 # -- FMP API key loaded via .env
 
 # -- NOTES --
-# -- overwrite=True on all Snowflake writes — full refresh each run, no duplicates
+# -- DELETE + append logic used — deletes only rows for the current ticker before uploading
+# -- This preserves data for all other tickers in the table
 # -- Shares outstanding derived as marketCap / price (FMP stable profile endpoint
 # --   does not return sharesOutstanding directly)
 # -- Derivation is an approximation — actual shares may differ slightly due to
@@ -96,7 +97,7 @@ def fetch_fmp(endpoint, ticker, extra_params=""):
         return pd.DataFrame()
 
 # --- SNOWFLAKE UPLOAD FUNCTION ---
-def upload_to_snowflake(df, table_name, schema):
+def upload_to_snowflake(df, table_name, schema, ticker):
     if df.empty:
         print(f"Skipping upload for {table_name} — empty DataFrame")
         return
@@ -105,69 +106,79 @@ def upload_to_snowflake(df, table_name, schema):
     conn.cursor().execute(f"USE SCHEMA {schema}")
     df.columns = [col.upper() for col in df.columns]
     df = df.reset_index(drop=True)
+
+    # -- Check if table exists before attempting DELETE
+    # -- If table does not exist yet, skip DELETE and let write_pandas create it
+    table_exists = conn.cursor().execute(f"""
+        SELECT COUNT(*) 
+        FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_SCHEMA = '{schema.upper()}' 
+        AND TABLE_NAME = '{table_name.upper()}'
+    """).fetchone()[0]
+
+    if table_exists:
+        # -- Delete existing rows for this ticker only — preserves all other tickers
+        conn.cursor().execute(f"""
+            DELETE FROM {schema}.{table_name}
+            WHERE TICKER = '{ticker}'
+        """)
+        print(f"  Deleted existing {ticker} rows from {schema}.{table_name}")
+    else:
+        print(f"  Table {schema}.{table_name} does not exist yet — will be created")
+
     success, nchunks, nrows, _ = write_pandas(
         conn, df, table_name.upper(),
         schema=schema.upper(),
         auto_create_table=True,
-        overwrite=True
+        overwrite=False
     )
-    print(f"Uploaded {nrows} rows to {schema}.{table_name}")
+    print(f"  Uploaded {nrows} rows to {schema}.{table_name}")
     conn.close()
 
 # --- PULL PRICE HISTORY ---
-def pull_price_history():
-    print("\nPulling price history...")
-    price_data = []
-    for ticker in TICKERS:
-        print(f"  Fetching price history for {ticker}...")
-        df = fetch_fmp("historical-price-eod/light", ticker, "&from=2020-01-01")
-        price_data.append(df)
-    df_all = pd.concat(price_data, ignore_index=True)
-    print(f"  {len(df_all)} price rows fetched")
-    return df_all
+def pull_price_history(ticker):
+    print(f"  Fetching price history for {ticker}...")
+    df = fetch_fmp("historical-price-eod/light", ticker, "&from=2020-01-01")
+    df['date'] = pd.to_datetime(df['date']).dt.date  # -- Standardize date format
+    print(f"  {len(df)} price rows fetched")
+    return df
 
 # --- PULL SHARES OUTSTANDING ---
-def pull_shares_outstanding():
-    print("\nPulling shares outstanding...")
-    shares_data = []
-    for ticker in TICKERS:
-        print(f"  Fetching shares outstanding for {ticker}...")
-        df_profile = fetch_fmp("profile", ticker)
-        if df_profile.empty:
-            continue
+def pull_shares_outstanding(ticker):
+    print(f"  Fetching shares outstanding for {ticker}...")
+    df_profile = fetch_fmp("profile", ticker)
+    if df_profile.empty:
+        return pd.DataFrame()
 
-        price = df_profile["price"].iloc[0]
-        market_cap = df_profile["marketCap"].iloc[0]
+    price = df_profile["price"].iloc[0]
+    market_cap = df_profile["marketCap"].iloc[0]
 
-        # Shares outstanding derived as marketCap / price
-        # FMP stable profile endpoint does not return sharesOutstanding directly
-        # Result is an approximation — actual shares outstanding may differ slightly
-        # due to rounding in FMP's marketCap calculation
-        # Since Emv = shares_outstanding * price = marketCap, market_cap is stored
-        # directly and used as Emv in the model — no further multiplication needed
-        shares_outstanding = market_cap / price if price and price > 0 else None
+    # -- Shares outstanding derived as marketCap / price
+    # -- FMP stable profile endpoint does not return sharesOutstanding directly
+    # -- Result is an approximation — actual shares outstanding may differ slightly
+    # --   due to rounding in FMP's marketCap calculation
+    # -- Since Emv = shares_outstanding * price = (marketCap / price) * price = marketCap,
+    # --   market_cap is stored directly and used as Emv in the model
+    shares_outstanding = market_cap / price if price and price > 0 else None
 
-        df_shares = pd.DataFrame([{
-            "ticker":               ticker,
-            "shares_outstanding":   shares_outstanding,
-            "market_cap":           market_cap,
-            "price":                price,
-            "pulled_date":          datetime.today().strftime('%Y-%m-%d')
-        }])
-        shares_data.append(df_shares)
-
-    df_all = pd.concat(shares_data, ignore_index=True)
-    print(f"  {len(df_all)} share rows fetched")
-    return df_all
+    return pd.DataFrame([{
+        "ticker":             ticker,
+        "shares_outstanding": shares_outstanding,
+        "market_cap":         market_cap,
+        "price":              price,
+        "pulled_date":        datetime.today().strftime('%Y-%m-%d')
+    }])
 
 # --- MAIN FUNCTION ---
 def run():
-    df_prices = pull_price_history()
-    df_shares = pull_shares_outstanding()
+    for ticker in TICKERS:
+        print(f"\n--- Processing {ticker} ---")
+        df_prices = pull_price_history(ticker)
+        df_shares = pull_shares_outstanding(ticker)
 
-    print("\nUploading to Snowflake RAW...")
-    upload_to_snowflake(df_prices, "PRICE_DATA", "RAW")
-    upload_to_snowflake(df_shares, "SHARES_OUTSTANDING", "RAW")
+        print(f"\n  Uploading {ticker} to Snowflake RAW...")
+        upload_to_snowflake(df_prices, "PRICE_DATA", "RAW", ticker)
+        upload_to_snowflake(df_shares, "SHARES_OUTSTANDING", "RAW", ticker)
 
     print("\nEquity data ingestion complete.")
 

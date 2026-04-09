@@ -1,3 +1,3 @@
 git add .
-git commit -m "Minor edits. Created a Damodaran folder to better understand Beta following Damodaran's Investment Valuation book. The idea is to go back to the basics to understand if my beta model is accurate or not."
+git commit -m "Replaced fake data with real KO stock prices and S&P 500 data from Snowflake."
 git push origin main
