@@ -60,7 +60,7 @@ BASE_URL = "https://financialmodelingprep.com/stable"
 # Enter tickers to stage separated by commas
 # Example: "GSAT, KO, IRDM" for multiple or "GSAT" for a single ticker
 # Tickers must already exist in VALUFLOW.RAW (run ingestion_v2.py and equity_data.py first)
-TICKERS = [t.strip().upper() for t in "KO".split(",")]
+TICKERS = [t.strip().upper() for t in "PG, CL, KMB, GIS".split(",")]
 
 # --- TICKER FILTER HELPER ---
 # Builds SQL IN clause from TICKERS list

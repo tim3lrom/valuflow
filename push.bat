@@ -1,3 +1,3 @@
 git add .
-git commit -m "Created a staging_v3 for better processing, allows ticker input to avoid Snowflake re-runs. Currently working on testing model to see if it is accurate."
+git commit -m "Minor edits. Created a Damodaran folder to better understand Beta following Damodaran's Investment Valuation book. The idea is to go back to the basics to understand if my beta model is accurate or not."
 git push origin main

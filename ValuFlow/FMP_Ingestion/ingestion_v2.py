@@ -80,7 +80,7 @@ SNOWFLAKE_CONN = {
 }
 
 # --- TICKERS --- CHANGE THESE FOR DIFFERENT INDUSTRIES ---
-TICKERS = ["KO"]
+TICKERS = ["GIS"]
 
 # --- FMP FETCH FUNCTION ---
 def fetch_fmp(endpoint, ticker, extra_params=""):
