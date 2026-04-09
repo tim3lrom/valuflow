@@ -20,7 +20,7 @@ from datetime import datetime
 import pandas as pd
 
 #---------- INPUT ----------#
-TICKER = "GSAT"         #  only works for companies I already have in Snowflake DB
+TICKER = "KO"         #  only works for companies I already have in Snowflake DB
 FREQUENCY = "monthly"         # options: "daily", "weekly", "monthly"
 #---------------------------#
 

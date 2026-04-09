@@ -80,7 +80,7 @@ SNOWFLAKE_CONN = {
 }
 
 # --- TICKERS --- MUST MATCH ingestion_v2.py ---
-TICKERS = ["VSAT", "IRDM", "GSAT"]
+TICKERS = ["KO"]
 
 # --- FMP FETCH FUNCTION ---
 def fetch_fmp(endpoint, ticker, extra_params=""):

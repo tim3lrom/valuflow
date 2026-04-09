@@ -82,7 +82,7 @@ load_dotenv()
 # ============================================================
 # 0. USER INPUTS
 # ============================================================
-TICKER = "GSAT"
+TICKER = "KO"
 FREQUENCY = "monthly"       # options: "daily", "weekly", "monthly"
 ICR_METHOD = "average"      # options: "latest" or "average" (average uses last 3 years)
 MATURITY_YEARS = 3          # years to maturity — sourced from GSAT 10-K (Senior Notes due 2029)
