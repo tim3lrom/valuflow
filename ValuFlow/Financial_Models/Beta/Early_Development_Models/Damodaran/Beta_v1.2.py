@@ -1,21 +1,19 @@
 # -- This folder serves as a working 'apply from reading' to Damodaran's Investment Valuation (4th Ed.) book
 # -- Reason for reading and implementing book: after trying to test my Beta Model v1.3.1 & v1.4.0 to real values I realized the complexity and nuances that live inside professional grade Beta calculations. So I wanted to go back to the roots and really understand what is going on to be able to judge if my calculated Betas are reasonable (hopefully I will build a decisioning software that will be a sum of my analyses)
 
-# -- Model Name: Beta_v1.2
+# -- Model Name: Beta_v2
 # -- Model Changes
 # -- Previous Model: Beta_v1
 # -- Replaced fake data with real KO stock prices and S&P 500 data from Snowflake
 # -- Replaced SQLAlchemy engine with snowflake.connector (password auth) to avoid MFA trigger
+# -- Added date range lever (START_DATE, END_DATE) to control regression window
+# -- Added frequency lever (FREQUENCY) with daily, weekly, monthly support
 
 # -- Goal: Calculate a regression estimate of beta using KO's figures & use an alpha benchmark
 # --       to see how well the stock did compared to expectations
 
 # -- Regression Estimate of Beta formula:
 # -- Rj = a + b * Rm
-
-# -- Alpha Benchmark formula:
-# -- Rj = a + b(Rm)
-
 
 # -- Rj = return on the stock in a given period (same period as Rm)
 # -- a  = alpha (intercept) — return when market is flat
@@ -31,6 +29,8 @@ import numpy as np
 import pandas as pd
 import snowflake.connector
 from dotenv import load_dotenv
+from datetime import date
+import scipy.stats as stats
 
 load_dotenv()
 
@@ -40,6 +40,10 @@ load_dotenv()
 TICKER = "KO"
 FREQUENCY = "monthly"       # options: "daily", "weekly", "monthly"
 RISK_FREE_RATE = 0.0423
+
+
+START_DATE = "2020-01-01"   # format: YYYY-MM-DD
+END_DATE = "latest"         # options: "latest" or specific date YYYY-MM-DD
 
 # ============================================================
 # 1. SNOWFLAKE CONNECTION
@@ -58,23 +62,32 @@ cursor = conn.cursor()
 # ============================================================
 # 2. PULL PRICE DATA FROM SNOWFLAKE
 # ============================================================
-# -- Pull ticker's stock prices
+# -- Resolve END_DATE — "latest" uses today's date
+end_date_resolved = date.today().strftime('%Y-%m-%d') if END_DATE == "latest" else END_DATE
+
+# -- Pull ticker's stock prices within date range
 cursor.execute(f"""
     SELECT DATE, PRICE 
     FROM VALUFLOW.RAW.PRICE_DATA 
-    WHERE TICKER = '{TICKER}' 
+    WHERE TICKER = '{TICKER}'
+    AND DATE >= '{START_DATE}'
+    AND DATE <= '{end_date_resolved}'
     ORDER BY DATE ASC
 """)
 rows_stock = cursor.fetchall()
 
-# -- Pull S&P 500 prices
-cursor.execute("""
+# -- Pull S&P 500 prices within date range
+cursor.execute(f"""
     SELECT DATE, PRICE 
     FROM VALUFLOW.RAW.SP500_PRICES 
+    WHERE DATE >= '{START_DATE}'
+    AND DATE <= '{end_date_resolved}'
     ORDER BY DATE ASC
 """)
 rows_market = cursor.fetchall()
 
+print(f"Ticker:      {TICKER}")
+print(f"Period:      {START_DATE} to {end_date_resolved}")
 print(f"Stock rows:  {len(rows_stock)}")
 print(f"Market rows: {len(rows_market)}")
 
@@ -118,7 +131,7 @@ print(f"Return observations:  {len(Stock_Returns)}")
 # 3.1 FREQUENCY TRANSLATION
 # ============================================================
 # -- Converts frequency label to number of periods per year
-# -- Used to annualize the risk free rate to match return frequency
+# -- Used to scale the annual risk free rate to match return frequency
 if FREQUENCY == 'daily':
     FREQUENCY_SUPPORT = 252
 elif FREQUENCY == 'weekly':
@@ -178,13 +191,18 @@ alpha_benchmark = risk_free_rate * (1 - beta)
 # ============================================================
 # 10. OUTPUT
 # ============================================================
-print(f"\n--- Regression Results ({FREQUENCY.capitalize()} | {TICKER}) ---")
+print(f"\n--- Regression Results ({FREQUENCY.capitalize()} | {TICKER} | {START_DATE} to {end_date_resolved}) ---")
 print(f"Beta:              {beta:.6f}")
 print(f"Alpha:             {alpha:.6f}")
 print(f"R-squared:         {r_squared:.4f}")
 print(f"1 - R-squared:     {1 - r_squared:.4f}  <- firm-specific risk")
 print(f"Risk-Free Rate:    {risk_free_rate:.6f}  <- {FREQUENCY} equivalent")
 print(f"Alpha Benchmark:   {alpha_benchmark:.6f}")
+
+slope, intercept, r_value, p_value, std_err = stats.linregress(Market_Returns, Stock_Returns)
+print(f"Beta:            {slope:.6f}")
+print(f"Standard Error:  {std_err:.6f}")
+print(f"P-value:         {p_value:.6f}")
 
 if alpha > alpha_benchmark:
     print("\nAlpha performed better than expected.")
