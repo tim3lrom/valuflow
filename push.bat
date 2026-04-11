@@ -1,3 +1,3 @@
 git add .
-git commit -m "Created ingestion_v4.py which is trying to pull all NYSE and NASDAQ information from FMP."
+git commit -m "Applied master beta model to all companies in NYSE & NASDAQ for model analysis."
 git push origin main

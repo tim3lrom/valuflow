@@ -1,4 +1,4 @@
-# ------- ValuFlow - Financial Statement Ingestion v3 ------- #
+# ------- ValuFlow - Financial Statement Ingestion v4 ------- #
 # ------- ingestion_v4.py ------- #
 
 # -- PURPOSE --
@@ -6,6 +6,8 @@
 # -- for all tickers in VALUFLOW.RAW.TICKER_UNIVERSE
 # -- Stores raw data in VALUFLOW.RAW schema for downstream staging
 # -- Checkpoint logic ensures crash recovery — resumes from last successful ticker
+
+# -- SHOULD NOT BE RUN MORE THAN ONCE, THIS IS A MASTER PULL, TAKES IN ALL FINANCIAL HISTORY FOR ALL OF NYSE & NASDAQ
 
 # -- CHANGES FROM ingestion_v2.py --
 # -- Ticker list now driven by VALUFLOW.RAW.TICKER_UNIVERSE (not hardcoded)
@@ -17,6 +19,10 @@
 # -- Pulls annual AND quarterly for all statement types
 # -- Delete-by-ticker before append — preserves all other tickers in table
 # -- Replaced overwrite=True with ticker-aware delete + append
+# -- Replaced quoted column approach with explicit rename map for reserved words
+# -- FMP fetching and Snowflake uploading fully separated per ticker
+# -- Single Snowflake connection per ticker shared across upload and checkpoint
+# -- Removed verbose upload print statements for cleaner console output
 
 # -- TABLES WRITTEN --
 # -- VALUFLOW.RAW.INCOME_STMT_ANNUAL
@@ -33,19 +39,17 @@
 
 # -- PIPELINE ORDER --
 # -- Step 1: universe.py       -> builds TICKER_UNIVERSE
-# -- Step 2: ingestion_v3.py   -> pulls financial data (this script)
+# -- Step 2: ingestion_v4.py   -> pulls financial data (this script)
 # -- Step 3: equity_data_v2.py -> pulls price history and shares outstanding
 # -- Step 4: staging_v4.py     -> transforms RAW into STAGING
 
 import requests
 import pandas as pd
 import snowflake.connector
-from snowflake.connector.pandas_tools import write_pandas
 from cryptography.hazmat.primitives import serialization
 from dotenv import load_dotenv
 from datetime import datetime
 import os
-import time
 
 # --- LOAD ENVIRONMENT VARIABLES ---
 load_dotenv(dotenv_path=r"C:\Users\timel\Desktop\ValuFlow\.env", override=True)
@@ -81,9 +85,69 @@ SNOWFLAKE_CONN = {
 # ============================================================
 # 0. USER INPUTS
 # ============================================================
-# -- Limit for financial statement history — None = full history
-STATEMENT_LIMIT = 1000      # effectively unlimited — FMP caps at available history
-BATCH_SIZE = 50             # number of tickers to process before printing progress
+STATEMENT_LIMIT = 1000
+BATCH_SIZE = 50
+
+# ============================================================
+# 0.1 COLUMN SANITIZATION
+# ============================================================
+RENAME_MAP = {
+    "DATE":       "FMP_DATE",
+    "VALUE":      "METRIC_VALUE",
+    "NAME":       "COMPANY_NAME",
+    "NUMBER":     "DOC_NUMBER",
+    "TIME":       "REPORT_TIME",
+    "TYPE":       "RECORD_TYPE",
+    "LEVEL":      "RECORD_LEVEL",
+    "SIZE":       "RECORD_SIZE",
+    "OPTION":     "RECORD_OPTION",
+    "ORDER":      "RECORD_ORDER",
+    "GROUP":      "RECORD_GROUP",
+    "FROM":       "RECORD_FROM",
+    "IN":         "RECORD_IN",
+    "ON":         "RECORD_ON",
+    "AS":         "RECORD_AS",
+    "IS":         "RECORD_IS",
+    "NOT":        "RECORD_NOT",
+    "AND":        "RECORD_AND",
+    "OR":         "RECORD_OR",
+    "END":        "RECORD_END",
+    "CASE":       "RECORD_CASE",
+    "WHEN":       "RECORD_WHEN",
+    "THEN":       "RECORD_THEN",
+    "ELSE":       "RECORD_ELSE",
+    "INTERVAL":   "RECORD_INTERVAL",
+    "PERCENT":    "RECORD_PERCENT",
+    "POSITION":   "RECORD_POSITION",
+    "TIMESTAMP":  "RECORD_TIMESTAMP",
+    "LANGUAGE":   "RECORD_LANGUAGE",
+    "YEAR":       "RECORD_YEAR",
+    "MONTH":      "RECORD_MONTH",
+    "DAY":        "RECORD_DAY",
+    "HOUR":       "RECORD_HOUR",
+    "MINUTE":     "RECORD_MINUTE",
+    "SECOND":     "RECORD_SECOND",
+    "ZONE":       "RECORD_ZONE",
+    "ROLE":       "RECORD_ROLE",
+    "SCHEMA":     "RECORD_SCHEMA",
+    "TABLE":      "RECORD_TABLE",
+    "COLUMN":     "RECORD_COLUMN",
+    "INDEX":      "RECORD_INDEX",
+    "VIEW":       "RECORD_VIEW",
+    "SEQUENCE":   "RECORD_SEQUENCE",
+    "FUNCTION":   "RECORD_FUNCTION",
+    "SELECT":     "RECORD_SELECT",
+    "WHERE":      "RECORD_WHERE",
+    "JOIN":       "RECORD_JOIN",
+    "LIMIT":      "RECORD_LIMIT",
+    "OFFSET":     "RECORD_OFFSET",
+    "HAVING":     "RECORD_HAVING"
+}
+
+def sanitize_columns(df):
+    df.columns = [col.upper() for col in df.columns]
+    df.columns = [RENAME_MAP.get(col, col) for col in df.columns]
+    return df
 
 # ============================================================
 # 1. FMP FETCH FUNCTION
@@ -93,12 +157,18 @@ def fetch_fmp(endpoint, ticker, extra_params=""):
     try:
         response = requests.get(url, timeout=30)
         data = response.json()
-        if isinstance(data, list) and len(data) > 0:
+
+        if not isinstance(data, list):
+            return pd.DataFrame()
+
+        if len(data) > 0:
             df = pd.DataFrame(data)
             df["TICKER"] = ticker
+            df = sanitize_columns(df)
             return df
         else:
             return pd.DataFrame()
+
     except Exception as e:
         print(f"  ERROR fetching {endpoint} for {ticker}: {e}")
         return pd.DataFrame()
@@ -111,53 +181,44 @@ def upload_to_snowflake(conn, df, table_name, ticker):
         return
 
     cursor = conn.cursor()
-
-    # -- Create table if it doesn't exist yet
-    cursor.execute(f"CREATE TABLE IF NOT EXISTS RAW.{table_name} (TICKER VARCHAR)")
-
-    # -- Delete existing rows for this ticker only
-    cursor.execute(f"DELETE FROM RAW.{table_name} WHERE TICKER = '{ticker}'")
-
-    # -- Standardize column names
-    df.columns = [col.upper() for col in df.columns]
     df = df.reset_index(drop=True)
 
-    write_pandas(
-        conn, df, table_name,
-        schema="RAW",
-        auto_create_table=True,
-        overwrite=False
-    )
+    col_defs = ", ".join([f"{col} VARCHAR" for col in df.columns])
+    full_table = f"VALUFLOW.RAW.{table_name}"
+
+    cursor.execute(f"CREATE TABLE IF NOT EXISTS {full_table} ({col_defs})")
+
+    try:
+        cursor.execute(f"DELETE FROM {full_table} WHERE TICKER = %s", (ticker,))
+    except:
+        pass
+
+    chunk_size = 1000
+    cols = ", ".join(df.columns)
+
+    for start in range(0, len(df), chunk_size):
+        chunk = df.iloc[start:start + chunk_size]
+        placeholders = ", ".join(["%s"] * len(df.columns))
+        insert_sql = f"INSERT INTO {full_table} ({cols}) VALUES ({placeholders})"
+
+        rows = [tuple(
+            None if pd.isna(v) else str(v) if not isinstance(v, (int, float, bool)) else v
+            for v in row
+        ) for row in chunk.itertuples(index=False)]
+
+        cursor.executemany(insert_sql, rows)
 
 # ============================================================
 # 3. LOAD TICKERS FROM TICKER_UNIVERSE
 # ============================================================
-def load_tickers(conn):
+def load_tickers():
     print("Loading tickers from VALUFLOW.RAW.TICKER_UNIVERSE...")
 
-    # -- Ensure FUNDAMENTALS_INGESTED column is VARCHAR to support 'NO_DATA'
+    conn = snowflake.connector.connect(**SNOWFLAKE_CONN)
     cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            ALTER TABLE RAW.TICKER_UNIVERSE
-            ALTER COLUMN FUNDAMENTALS_INGESTED SET DATA TYPE VARCHAR(20)
-        """)
-    except:
-        pass  # column may already be VARCHAR
-
-    # -- Also add timestamp column if it doesn't exist
-    try:
-        cursor.execute("""
-            ALTER TABLE RAW.TICKER_UNIVERSE
-            ADD COLUMN IF NOT EXISTS FUNDAMENTALS_INGESTED_AT TIMESTAMP
-        """)
-    except:
-        pass
-
-    # -- Pull only tickers not yet successfully ingested
     cursor.execute("""
         SELECT TICKER
-        FROM RAW.TICKER_UNIVERSE
+        FROM VALUFLOW.RAW.TICKER_UNIVERSE
         WHERE FUNDAMENTALS_INGESTED IS NULL
            OR FUNDAMENTALS_INGESTED = 'False'
            OR FUNDAMENTALS_INGESTED = 'false'
@@ -165,75 +226,66 @@ def load_tickers(conn):
     """)
 
     tickers = [row[0] for row in cursor.fetchall()]
+    conn.close()
     print(f"  {len(tickers)} tickers pending ingestion")
     return tickers
 
 # ============================================================
-# 4. UPDATE CHECKPOINT
+# 4. INGEST SINGLE TICKER
 # ============================================================
-def update_checkpoint(conn, ticker, status):
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    conn.cursor().execute(f"""
-        UPDATE RAW.TICKER_UNIVERSE
-        SET FUNDAMENTALS_INGESTED = '{status}',
-            FUNDAMENTALS_INGESTED_AT = '{timestamp}'
-        WHERE TICKER = '{ticker}'
-    """)
-
-# ============================================================
-# 5. INGEST SINGLE TICKER
-# ============================================================
-def ingest_ticker(conn, ticker):
+def ingest_ticker(ticker):
+    # -- STEP 1: Fetch all FMP data first — no Snowflake connections open
     results = {}
-
-    # -- Annual statements
-    results["INCOME_STMT_ANNUAL"]    = fetch_fmp("income-statement", ticker, f"&period=annual&limit={STATEMENT_LIMIT}")
-    results["BALANCE_SHEET_ANNUAL"]  = fetch_fmp("balance-sheet-statement", ticker, f"&period=annual&limit={STATEMENT_LIMIT}")
-    results["CASH_FLOW_ANNUAL"]      = fetch_fmp("cash-flow-statement", ticker, f"&period=annual&limit={STATEMENT_LIMIT}")
-
-    # -- Quarterly statements
+    results["INCOME_STMT_ANNUAL"]      = fetch_fmp("income-statement", ticker, f"&period=annual&limit={STATEMENT_LIMIT}")
+    results["BALANCE_SHEET_ANNUAL"]    = fetch_fmp("balance-sheet-statement", ticker, f"&period=annual&limit={STATEMENT_LIMIT}")
+    results["CASH_FLOW_ANNUAL"]        = fetch_fmp("cash-flow-statement", ticker, f"&period=annual&limit={STATEMENT_LIMIT}")
     results["INCOME_STMT_QUARTERLY"]   = fetch_fmp("income-statement", ticker, f"&period=quarter&limit={STATEMENT_LIMIT}")
     results["BALANCE_SHEET_QUARTERLY"] = fetch_fmp("balance-sheet-statement", ticker, f"&period=quarter&limit={STATEMENT_LIMIT}")
     results["CASH_FLOW_QUARTERLY"]     = fetch_fmp("cash-flow-statement", ticker, f"&period=quarter&limit={STATEMENT_LIMIT}")
-
-    # -- Key metrics and ratios
     results["KEY_METRICS_ANNUAL"]      = fetch_fmp("key-metrics", ticker, f"&period=annual&limit={STATEMENT_LIMIT}")
     results["KEY_METRICS_QUARTERLY"]   = fetch_fmp("key-metrics", ticker, f"&period=quarter&limit={STATEMENT_LIMIT}")
     results["RATIOS_ANNUAL"]           = fetch_fmp("ratios", ticker, f"&period=annual&limit={STATEMENT_LIMIT}")
     results["RATIOS_QUARTERLY"]        = fetch_fmp("ratios", ticker, f"&period=quarter&limit={STATEMENT_LIMIT}")
+    results["COMPANY_PROFILE"]         = fetch_fmp("profile", ticker)
 
-    # -- Company profile
-    results["COMPANY_PROFILE"] = fetch_fmp("profile", ticker)
-
-    # -- Check if all results are empty
     all_empty = all(df.empty for df in results.values())
     if all_empty:
-        return False, results
+        return False
 
-    # -- Upload non-empty results
-    for table_name, df in results.items():
-        if not df.empty:
-            upload_to_snowflake(conn, df, table_name, ticker)
+    # -- STEP 2: Single Snowflake connection for both upload and checkpoint
+    conn = snowflake.connector.connect(**SNOWFLAKE_CONN)
+    try:
+        for table_name, df in results.items():
+            if not df.empty:
+                upload_to_snowflake(conn, df, table_name, ticker)
 
-    return True, results
+        # -- Update checkpoint in same connection
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        conn.cursor().execute(f"""
+            UPDATE VALUFLOW.RAW.TICKER_UNIVERSE
+            SET FUNDAMENTALS_INGESTED = 'True',
+                FUNDAMENTALS_INGESTED_AT = '{timestamp}'
+            WHERE TICKER = '{ticker}'
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+    return True
 
 # ============================================================
-# 6. MAIN
+# 5. MAIN
 # ============================================================
 def run():
     print("=" * 60)
-    print("ValuFlow — ingestion_v3.py")
+    print("ValuFlow — ingestion_v4.py")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
-    conn = snowflake.connector.connect(**SNOWFLAKE_CONN)
-    conn.cursor().execute("USE SCHEMA RAW")
-
-    tickers = load_tickers(conn)
+    tickers = load_tickers()
 
     if not tickers:
         print("All tickers already ingested. Exiting.")
-        conn.close()
         return
 
     success_count = 0
@@ -242,28 +294,33 @@ def run():
 
     for i, ticker in enumerate(tickers, 1):
         try:
-            success, _ = ingest_ticker(conn, ticker)
+            success = ingest_ticker(ticker)
 
             if success:
-                update_checkpoint(conn, ticker, "True")
                 success_count += 1
             else:
-                update_checkpoint(conn, ticker, "NO_DATA")
+                # -- Mark NO_DATA in separate connection
+                conn = snowflake.connector.connect(**SNOWFLAKE_CONN)
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                conn.cursor().execute(f"""
+                    UPDATE VALUFLOW.RAW.TICKER_UNIVERSE
+                    SET FUNDAMENTALS_INGESTED = 'NO_DATA',
+                        FUNDAMENTALS_INGESTED_AT = '{timestamp}'
+                    WHERE TICKER = '{ticker}'
+                """)
+                conn.commit()
+                conn.close()
                 no_data_count += 1
                 print(f"  [{i}/{len(tickers)}] {ticker} — NO_DATA")
 
         except Exception as e:
             error_count += 1
             print(f"  [{i}/{len(tickers)}] {ticker} — ERROR: {e}")
-            # -- Leave as False so it retries on next run
 
-        # -- Progress update every BATCH_SIZE tickers
         if i % BATCH_SIZE == 0:
-            print(f"\n--- Progress: {i}/{len(tickers)} tickers processed ---")
+            print(f"\n--- Progress: {i}/{len(tickers)} ---")
             print(f"    Success: {success_count} | No Data: {no_data_count} | Errors: {error_count}")
             print(f"    Time: {datetime.now().strftime('%H:%M:%S')}\n")
-
-    conn.close()
 
     print("\n" + "=" * 60)
     print("Ingestion complete")
