@@ -80,7 +80,7 @@ load_dotenv(dotenv_path=r"C:\Users\timel\Desktop\ValuFlow\.env", override=True)
 # ============================================================
 SECTOR           = "All"                            # "All" or a specific sector name
 INDUSTRY         = None                             # String to filter further, or None for all
-FREQUENCIES      = ["dasily", "weekly", "monthly"]  # Any combination of the three
+FREQUENCIES      = ["daily", "weekly", "monthly"]  # Any combination of the three
 START_DATE       = "2020-01-01"                     # format: YYYY-MM-DD
 END_DATE         = "latest"                         # "latest" or specific date YYYY-MM-DD
 TAX_RATE         = 0.21                             # US corporate tax rate (fixed)
@@ -380,7 +380,7 @@ for FREQUENCY in FREQUENCIES:
             results.append({
                 # -- Run identity — links every row back to a specific execution
                 "RUN_ID":                RUN_ID,
-                "RUN_TIMESTAMP":         RUN_TIMESTAMP,
+                "RUN_TIMESTAMP":         RUN_TIMESTAMP.strftime('%Y-%m-%d %H:%M:%S'),
                 "RUN_DATE":              date.today(),
                 "TICKER":                ticker,
                 "COMPANY_NAME":          company_name,
@@ -448,18 +448,16 @@ if all_results:
         private_key= private_key_bytes,
         role=        "SYSADMIN",
     )
-
     success, nchunks, nrows, _ = write_pandas(
         conn_vf,
         df_results,
         table_name="BETA_SENSITIVITY_REGRESSION_FLOW_V1",
         database="VFMODELS",
         schema="BETA",
-        overwrite=False,
+        overwrite=True,
         auto_create_table=False,
     )
     conn_vf.close()
-
     print(f"Rows written to VFMODELS.BETA.BETA_SENSITIVITY_REGRESSION_FLOW_V1: {nrows:,}")
 else:
     print("No results to write.")
